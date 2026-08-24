@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>DSHLauncher</string>
+	<string>DSH Desktop</string>
 	<key>CFBundleDisplayName</key>
-	<string>DSH 桌面版</string>
+	<string>DSH Desktop</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.fangchen.dsh-launcher</string>
 	<key>CFBundleExecutable</key>
@@ -18,6 +18,8 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSHighResolutionCapable</key>

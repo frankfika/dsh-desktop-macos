@@ -1,6 +1,6 @@
 import SwiftUI
 import AppKit
-import WebKit
+@preconcurrency import WebKit
 import ServiceManagement
 import Darwin
 
@@ -1018,7 +1018,7 @@ struct DSHLauncherApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        WindowGroup("DSH 桌面版") {
+        WindowGroup("DSH Desktop") {
             ContentView()
         }
         .windowResizability(.contentMinSize)
