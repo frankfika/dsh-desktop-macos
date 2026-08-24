@@ -11,6 +11,22 @@ and common controls in one window.
 > is not affiliated with or endorsed by DeepSeek. DeepSeek Harness is installed separately
 > from the official `@deepseek-ai/dsh` npm package.
 
+## Quick Install / 快速安装
+
+Install [Node.js 22.19+ or 24+](https://nodejs.org/), then run this command in Terminal：
+先安装 Node.js 22.19+ 或 24+，再在终端运行：
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/frankfika/dsh-desktop-macos/main/install.sh)"
+```
+
+The open-source installer verifies the GitHub Release SHA-256 before installing and
+removes quarantine only from the verified DSH Desktop bundle. It also installs the
+official `@deepseek-ai/dsh` runtime and launches the app.
+
+开源安装器会先校验 GitHub Release 的 SHA-256，再安装应用；它只解除校验通过的 DSH
+Desktop 应用隔离属性，同时安装官方 `@deepseek-ai/dsh` 运行时并启动应用。
+
 ## Features
 
 - Native SwiftUI + WebKit app with no third-party app dependencies
