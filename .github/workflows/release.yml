@@ -9,11 +9,11 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  macos:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: Build universal app
+      - name: Build universal macOS app
         env:
           VERSION: ${{ github.ref_name }}
           BUILD_NUMBER: ${{ github.run_number }}
@@ -22,10 +22,60 @@ jobs:
           export VERSION
           ./build.sh
           ./scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: .build/dist/*
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build Windows app
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          ./windows/package.ps1 -RuntimeIdentifier "${{ matrix.runtime }}" -Version $version
+      - name: Smoke test Windows x64 app
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: |
+          $app = Resolve-Path ".build/windows/win-x64/DSH Desktop.exe"
+          $process = Start-Process -FilePath $app -PassThru
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) {
+            throw "DSH Desktop exited during the Windows smoke test with code $($process.ExitCode)"
+          }
+          Stop-Process -Id $process.Id -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.runtime }}
+          path: .build/dist-windows/*
+          if-no-files-found: error
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --generate-notes --title "DSH Desktop $GITHUB_REF_NAME"
-          gh release upload "$GITHUB_REF_NAME" .build/dist/* --clobber
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --generate-notes --title "DSH Desktop $GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" --clobber

@@ -11,7 +11,7 @@ and common controls in one window.
 > is not affiliated with or endorsed by DeepSeek. DeepSeek Harness is installed separately
 > from the official `@deepseek-ai/dsh` npm package.
 
-## Quick Install / 快速安装
+## macOS Quick Install / macOS 快速安装
 
 Install [Node.js 22.19+ or 24+](https://nodejs.org/), then run this command in Terminal：
 先安装 Node.js 22.19+ 或 24+，再在终端运行：
@@ -27,10 +27,30 @@ official `@deepseek-ai/dsh` runtime and launches the app.
 开源安装器会先校验 GitHub Release 的 SHA-256，再安装应用；它只解除校验通过的 DSH
 Desktop 应用隔离属性，同时安装官方 `@deepseek-ai/dsh` 运行时并启动应用。
 
+## Windows Download / Windows 下载
+
+Download the appropriate portable ZIP from
+[the latest Release](https://github.com/frankfika/dsh-desktop-macos/releases/latest):
+
+- `DSH-Desktop-Windows-win-x64-*.zip` for most Intel/AMD Windows computers
+- `DSH-Desktop-Windows-win-arm64-*.zip` for Windows on ARM
+
+Extract the ZIP and run **DSH Desktop.exe**. The Windows build is self-contained, so .NET
+does not need to be installed. Node.js 22.19+ or 24+ is still required. If DSH is missing,
+click **Install official DSH runtime** inside the app; it installs the official npm package
+to `%USERPROFILE%\.dsh\app` and starts the service automatically.
+
+从最新 Release 下载对应的 Windows 便携 ZIP，解压后运行 **DSH Desktop.exe**。大多数
+电脑选择 `win-x64`，Windows ARM 设备选择 `win-arm64`。应用已包含 .NET 运行时；仍需
+Node.js 22.19+ 或 24+。如果没有 DSH，在应用中点击 **Install official DSH runtime**
+即可安装官方 npm 包并自动启动。
+
 ## Features
 
 - Native SwiftUI + WebKit app with no third-party app dependencies
 - Universal binary for Apple Silicon and Intel Macs
+- Native Windows 10/11 app using WinForms and Microsoft Edge WebView2
+- Self-contained Windows x64 and ARM64 builds with no separate .NET requirement
 - Detects an existing healthy `dsh web` process or starts one automatically
 - Start, stop, restart, open in browser, launch at login, and live logs
 - Detects Homebrew, npm, nvm, WorkBuddy, and the recommended local installation path

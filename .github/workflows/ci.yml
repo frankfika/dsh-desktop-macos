@@ -25,3 +25,36 @@ jobs:
           name: DSH-Desktop-universal
           path: .build/dist/*
           if-no-files-found: error
+
+  windows:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore Windows project
+        run: dotnet restore windows/DSHDesktop.Windows.csproj
+      - name: Publish portable Windows build
+        shell: pwsh
+        run: ./windows/package.ps1 -RuntimeIdentifier "${{ matrix.runtime }}" -Version "1.1.0"
+      - name: Smoke test Windows x64 app
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: |
+          $app = Resolve-Path ".build/windows/win-x64/DSH Desktop.exe"
+          $process = Start-Process -FilePath $app -PassThru
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) {
+            throw "DSH Desktop exited during the Windows smoke test with code $($process.ExitCode)"
+          }
+          Stop-Process -Id $process.Id -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DSH-Desktop-Windows-${{ matrix.runtime }}
+          path: .build/dist-windows/*
+          if-no-files-found: error
