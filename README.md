@@ -1,11 +1,12 @@
-# DSH Desktop for macOS
+# DSH Desktop for macOS and Windows
 
 [中文说明](#中文说明) · [Download](https://github.com/frankfika/dsh-desktop-macos/releases/latest) · [Report a bug](https://github.com/frankfika/dsh-desktop-macos/issues)
 
-A tiny native macOS desktop shell for the official
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI. It starts and
-stops the local `dsh` service, embeds the UI in a `WKWebView`, and keeps the runtime logs
-and common controls in one window.
+A native desktop shell for the official
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web UI on macOS and
+Windows. It starts and stops the local `dsh` service, embeds the UI using WKWebView on
+macOS or Microsoft Edge WebView2 on Windows, and keeps runtime logs and common controls
+in one window.
 
 > This is an independent community project. It is not an official DeepSeek product and
 > is not affiliated with or endorsed by DeepSeek. DeepSeek Harness is installed separately
