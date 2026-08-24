@@ -1,0 +1,26 @@
+DSH Desktop — Community Build Installation
+==========================================
+
+This open-source community build is not Apple-notarized because the maintainer does not
+currently have an Apple Developer ID certificate.
+
+Recommended verified installation
+---------------------------------
+
+Open Terminal and run:
+
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/frankfika/dsh-desktop-macos/main/install.sh)"
+
+The open-source installer downloads the latest ZIP from GitHub Releases, verifies its
+SHA-256 checksum, installs the app, removes quarantine only from that app bundle, installs
+the official @deepseek-ai/dsh runtime, and launches DSH Desktop.
+
+You can inspect install.sh in the repository before running it:
+https://github.com/frankfika/dsh-desktop-macos/blob/main/install.sh
+
+Manual installation
+-------------------
+
+Drag DSH Desktop to Applications. On first launch, Control-click the app in Finder,
+choose Open, then confirm Open. This is Apple's supported override for a trusted,
+non-notarized app.

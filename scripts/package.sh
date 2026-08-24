@@ -26,17 +26,24 @@ cleanup() { rm -rf "$STAGING"; }
 trap cleanup EXIT
 
 mkdir -p "$DIST" "$STAGING/DSH Desktop"
-rm -f "$DIST/DSH-Desktop-${VERSION}.zip" "$DIST/DSH-Desktop-${VERSION}.dmg"
+rm -f "$DIST/DSH-Desktop-${VERSION}.zip" "$DIST/DSH-Desktop-${VERSION}.dmg" \
+    "$DIST/DSH-Desktop-latest.zip" "$DIST/DSH-Desktop-latest.zip.sha256"
 
 ditto "$APP" "$STAGING/DSH Desktop/$APP_NAME.app"
+cp INSTALL.txt "$STAGING/DSH Desktop/INSTALL.txt"
 ln -s /Applications "$STAGING/DSH Desktop/Applications"
 
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$DIST/DSH-Desktop-${VERSION}.zip"
+cp "$DIST/DSH-Desktop-${VERSION}.zip" "$DIST/DSH-Desktop-latest.zip"
 hdiutil create -quiet -volname "DSH Desktop" -srcfolder "$STAGING/DSH Desktop" \
     -ov -format UDZO "$DIST/DSH-Desktop-${VERSION}.dmg"
 
-shasum -a 256 "$DIST/DSH-Desktop-${VERSION}.zip" "$DIST/DSH-Desktop-${VERSION}.dmg" \
-    > "$DIST/SHA256SUMS.txt"
+(
+    cd "$DIST"
+    shasum -a 256 "DSH-Desktop-${VERSION}.zip" "DSH-Desktop-${VERSION}.dmg" \
+        "DSH-Desktop-latest.zip" > SHA256SUMS.txt
+    shasum -a 256 "DSH-Desktop-latest.zip" > "DSH-Desktop-latest.zip.sha256"
+)
 
 echo "Release artifacts:"
 ls -lh "$DIST"

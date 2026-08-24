@@ -33,24 +33,22 @@ review approval requests.
 
 ## Install
 
-1. Download the latest universal `.dmg` from
-   [GitHub Releases](https://github.com/frankfika/dsh-desktop-macos/releases/latest), then
-   drag **DSH Desktop** into **Applications**.
-2. Install [Node.js](https://nodejs.org/) if `node --version` does not work.
-3. Install the official DSH runtime in the app's stable, user-local path:
+Install [Node.js](https://nodejs.org/) first, then use the verified community installer:
 
-   ```bash
-   mkdir -p "$HOME/.dsh/app"
-   npm install --prefix "$HOME/.dsh/app" @deepseek-ai/dsh@latest
-   ```
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/frankfika/dsh-desktop-macos/main/install.sh)"
+```
 
-4. Open DSH Desktop. The app finds
-   `~/.dsh/app/node_modules/.bin/dsh` and starts the local Web UI.
+The installer downloads the latest ZIP from GitHub Releases, verifies its SHA-256
+checksum, installs the app, removes quarantine only from that app bundle, installs the
+official `@deepseek-ai/dsh` runtime, and launches DSH Desktop. Review
+[install.sh](install.sh) before running it if you prefer.
 
-The current community build is ad-hoc signed because the project does not yet have an
-Apple Developer ID certificate. On first launch, macOS may ask you to confirm the app:
-Control-click the app in Finder, choose **Open**, then choose **Open** again. Future
-Developer ID-signed and notarized builds will remove this extra step.
+You can also download the universal `.dmg` from
+[GitHub Releases](https://github.com/frankfika/dsh-desktop-macos/releases/latest) and
+install manually. The community build is ad-hoc signed because the project does not yet
+have an Apple Developer ID certificate. For a manual first launch, Control-click the app
+in Finder, choose **Open**, then confirm **Open**.
 
 ## Build from source
 
@@ -76,7 +74,7 @@ Create local ZIP and DMG artifacts with:
 ./scripts/package.sh
 ```
 
-Pushing a tag such as `v1.0.0` runs the GitHub Actions release workflow and attaches the
+Pushing a tag such as `v1.0.2` runs the GitHub Actions release workflow and attaches the
 universal ZIP, DMG, and SHA-256 checksums to a GitHub Release.
 
 ## Project structure
@@ -86,6 +84,7 @@ Sources/DSHLauncher.swift  Process lifecycle, SwiftUI window, and embedded Web U
 tools/IconGen.swift        Programmatic app icon generator
 Info.plist                 macOS bundle metadata
 build.sh                   Reproducible universal app build
+install.sh                 Verified community installer
 scripts/package.sh         ZIP, DMG, and checksum packaging
 .github/workflows/         Continuous integration and tagged releases
 ```
@@ -116,20 +115,19 @@ DeepSeek Harness 运行时始终从官方 npm 包 `@deepseek-ai/dsh` 单独安�
 
 ### 安装
 
-1. 从 [Releases](https://github.com/frankfika/dsh-desktop-macos/releases/latest) 下载最新版
-   通用 `.dmg`，把 **DSH Desktop** 拖入“应用程序”。
-2. 安装 Node.js 22.19+ 或 24+。
-3. 在终端执行：
+先安装 Node.js 22.19+ 或 24+，再在终端运行社区验证安装器：
 
-   ```bash
-   mkdir -p "$HOME/.dsh/app"
-   npm install --prefix "$HOME/.dsh/app" @deepseek-ai/dsh@latest
-   ```
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/frankfika/dsh-desktop-macos/main/install.sh)"
+```
 
-4. 打开 DSH Desktop，应用会自动发现并启动 DSH。
+安装器会从 GitHub Release 下载最新版 ZIP、核对 SHA-256、安装应用、仅移除该 App 的
+隔离标记、安装官方 `@deepseek-ai/dsh` 运行时并启动应用。运行前可先查看仓库中的
+[install.sh](install.sh) 源码。
 
-目前发布包使用临时签名，因为尚未配置 Apple Developer ID 证书。第一次打开时如果被
-macOS 拦截，请在 Finder 里按住 Control 点击应用，选择“打开”，再次确认“打开”。
+也可以从 [Releases](https://github.com/frankfika/dsh-desktop-macos/releases/latest) 下载
+通用 `.dmg` 手动安装。目前发布包使用临时签名，因为项目尚无 Apple Developer ID；手动
+安装后第一次打开时，请在 Finder 里按住 Control 点击应用，选择“打开”，再次确认。
 
 DeepSeek Harness 仍处于开发者预览阶段，智能体可能读取或修改你选择的工作目录。建议先在
 临时项目中使用受限凭据测试，并认真检查每一次权限确认。
