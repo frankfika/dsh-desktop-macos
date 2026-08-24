@@ -149,6 +149,21 @@ func findNodeExecutable() -> String? {
     return nil
 }
 
+/// 查找与 Node.js 配套的 npm，用于在用户确认后安装官方 DSH 运行时。
+func findNpmExecutable() -> String? {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    var candidates = [
+        "/opt/homebrew/bin/npm",
+        "/usr/local/bin/npm",
+        home + "/.nvm/versions/node/default/bin/npm",
+    ]
+    if let node = findNodeExecutable() {
+        candidates.insert((node as NSString).deletingLastPathComponent + "/npm", at: 0)
+    }
+    candidates += dynamicNodeBinDirs(home: home).map { $0 + "/npm" }
+    return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+}
+
 /// 把常见 Node 安装目录加入 PATH，确保 dsh 的 shebang `#!/usr/bin/env node` 能找到解释器
 func enrichedEnvironment() -> [String: String] {
     var env = ProcessInfo.processInfo.environment
@@ -263,8 +278,10 @@ final class Manager: ObservableObject {
         return true
     }()
     @Published var launchAtLogin: Bool = (SMAppService.mainApp.status == .enabled)
+    @Published var isInstallingRuntime: Bool = false
 
     private var proc: Process?
+    private var installProc: Process?
     private var readyTimer: Timer?
     private var watchTimer: Timer?
     private var logLines: [String] = []
@@ -313,6 +330,90 @@ final class Manager: ObservableObject {
     func clearLogs() {
         logLines.removeAll()
         logs = ""
+    }
+
+    // MARK: 安装官方 DSH 运行时
+
+    /// 用户主动点击后，通过 npm 安装官方 @deepseek-ai/dsh 到稳定的用户目录。
+    /// 使用 Process 参数数组而不是 shell 字符串，避免命令注入和 PATH 差异。
+    func installOfficialRuntime() {
+        guard !isInstallingRuntime else { return }
+        guard let npm = findNpmExecutable() else {
+            state = .failed("未找到 npm，请先安装 Node.js 22.19+ 或 24+")
+            appendLog("✗ 未找到 npm；请先从 https://nodejs.org/ 安装 Node.js")
+            return
+        }
+
+        let prefix = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".dsh/app", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
+        } catch {
+            state = .failed("无法创建 DSH 安装目录: \(error.localizedDescription)")
+            return
+        }
+
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: npm)
+        p.arguments = [
+            "install",
+            "--prefix", prefix.path,
+            "@deepseek-ai/dsh@latest",
+            "--no-fund",
+            "--no-audit",
+        ]
+        p.currentDirectoryURL = prefix
+        p.environment = enrichedEnvironment()
+
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        p.terminationHandler = { [weak self] process in
+            DispatchQueue.main.async {
+                self?.finishRuntimeInstall(exitCode: process.terminationStatus, prefix: prefix)
+            }
+        }
+
+        let fh = pipe.fileHandleForReading
+        fh.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                return
+            }
+            guard let output = String(data: data, encoding: .utf8) else { return }
+            let text = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return }
+            DispatchQueue.main.async { self?.appendLog(text) }
+        }
+
+        do {
+            try p.run()
+            installProc = p
+            isInstallingRuntime = true
+            state = .stopped
+            appendLog("⬇️ 正在安装官方 @deepseek-ai/dsh → \(prefix.path)")
+        } catch {
+            state = .failed("启动 npm 失败: \(error.localizedDescription)")
+            appendLog("✗ 启动 npm 失败: \(error.localizedDescription)")
+        }
+    }
+
+    private func finishRuntimeInstall(exitCode: Int32, prefix: URL) {
+        installProc = nil
+        isInstallingRuntime = false
+        let installed = prefix.appendingPathComponent("node_modules/.bin/dsh").path
+        guard exitCode == 0, FileManager.default.isExecutableFile(atPath: installed) else {
+            state = .failed("DSH 安装失败（npm 退出码 \(exitCode)），请在设置中查看日志")
+            appendLog("✗ 官方 DSH 运行时安装失败（npm 退出码 \(exitCode)）")
+            return
+        }
+
+        dshPath = installed
+        persist()
+        state = .stopped
+        appendLog("✅ 官方 DSH 运行时安装完成")
+        start()
     }
 
     // MARK: 自动启动 / 外部实例检测
@@ -673,6 +774,7 @@ final class Manager: ObservableObject {
 
     /// 退出应用时清理子进程（受「退出时停止服务」开关控制）
     func terminateChild() {
+        installProc?.terminate()
         guard stopOnQuit else { return }
         if let p = proc {
             p.terminate()
@@ -830,6 +932,7 @@ struct ContentView: View {
     }
 
     private var statusText: String {
+        if mgr.isInstallingRuntime { return "正在安装 DSH…" }
         switch mgr.state {
         case .stopped: return "已停止"
         case .starting: return "启动中…"
@@ -841,6 +944,7 @@ struct ContentView: View {
     }
 
     private var statusColor: Color {
+        if mgr.isInstallingRuntime { return .orange }
         switch mgr.state {
         case .stopped: return .gray
         case .starting, .stopping: return .orange
@@ -860,17 +964,34 @@ struct ContentView: View {
             Text(mgr.url.absoluteString)
                 .font(.system(.body, design: .monospaced))
                 .foregroundColor(.secondary)
-            if mgr.state == .stopped {
+            if mgr.isInstallingRuntime {
+                ProgressView().controlSize(.small)
+                Text("正在通过 npm 安装官方 @deepseek-ai/dsh…")
+                    .foregroundColor(.secondary)
+                Text("安装完成后将自动启动服务")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else if mgr.dshPath.isEmpty {
+                if case .failed(let msg) = mgr.state {
+                    Text(msg).foregroundColor(.red).font(.callout)
+                } else {
+                    Text("未找到 DeepSeek Harness 运行时")
+                        .foregroundColor(.secondary)
+                        .font(.callout)
+                }
+                Button(action: { mgr.installOfficialRuntime() }) {
+                    Label("一键安装官方 DSH 运行时", systemImage: "arrow.down.circle.fill")
+                }
+                .controlSize(.large)
+                Text("需要 Node.js 22.19+ 或 24+；运行时将安装到 ~/.dsh/app")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else if mgr.state == .stopped {
                 Button(action: { mgr.start() }) {
                     Label("启动服务", systemImage: "play.fill")
                 }
                 .controlSize(.large)
                 .disabled(!mgr.canStart)
-                if mgr.dshPath.isEmpty {
-                    Text("未找到 dsh 命令，请到设置中指定路径")
-                        .foregroundColor(.red)
-                        .font(.callout)
-                }
             } else if case .failed(let msg) = mgr.state {
                 Text(msg).foregroundColor(.red).font(.callout)
             } else {
@@ -930,6 +1051,10 @@ struct SettingsView: View {
                         TextField("", text: $mgr.dshPath)
                             .font(.system(.body, design: .monospaced))
                         Button("浏览…") { pickPath() }
+                        if !FileManager.default.isExecutableFile(atPath: mgr.dshPath) {
+                            Button("安装官方版本") { mgr.installOfficialRuntime() }
+                                .disabled(mgr.isInstallingRuntime)
+                        }
                         if FileManager.default.isExecutableFile(atPath: mgr.dshPath) {
                             Text("✓ 有效").foregroundColor(.green)
                         } else {

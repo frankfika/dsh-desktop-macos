@@ -15,6 +15,9 @@ The open-source installer downloads the latest ZIP from GitHub Releases, verifie
 SHA-256 checksum, installs the app, removes quarantine only from that app bundle, installs
 the official @deepseek-ai/dsh runtime, and launches DSH Desktop.
 
+If you install the app manually and DSH is missing, the first-run screen also provides an
+Install official DSH runtime button. It installs to ~/.dsh/app and starts automatically.
+
 You can inspect install.sh in the repository before running it:
 https://github.com/frankfika/dsh-desktop-macos/blob/main/install.sh
 

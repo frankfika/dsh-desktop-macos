@@ -34,6 +34,7 @@ Desktop 应用隔离属性，同时安装官方 `@deepseek-ai/dsh` 运行时并�
 - Detects an existing healthy `dsh web` process or starts one automatically
 - Start, stop, restart, open in browser, launch at login, and live logs
 - Detects Homebrew, npm, nvm, WorkBuddy, and the recommended local installation path
+- Offers one-click installation of the official `@deepseek-ai/dsh` runtime when missing
 - Cleans up an unresponsive `dsh` process after confirming that its local HTTP endpoint
   is unhealthy
 
@@ -59,6 +60,10 @@ The installer downloads the latest ZIP from GitHub Releases, verifies its SHA-25
 checksum, installs the app, removes quarantine only from that app bundle, installs the
 official `@deepseek-ai/dsh` runtime, and launches DSH Desktop. Review
 [install.sh](install.sh) before running it if you prefer.
+
+If the app was installed manually and cannot find DSH, its first-run screen provides an
+**Install official DSH runtime** button. The app invokes npm directly without a shell and
+installs the official package into `~/.dsh/app`, then starts the service automatically.
 
 You can also download the universal `.dmg` from
 [GitHub Releases](https://github.com/frankfika/dsh-desktop-macos/releases/latest) and
@@ -90,7 +95,7 @@ Create local ZIP and DMG artifacts with:
 ./scripts/package.sh
 ```
 
-Pushing a tag such as `v1.0.2` runs the GitHub Actions release workflow and attaches the
+Pushing a tag such as `v1.0.3` runs the GitHub Actions release workflow and attaches the
 universal ZIP, DMG, and SHA-256 checksums to a GitHub Release.
 
 ## Project structure
@@ -101,6 +106,7 @@ tools/IconGen.swift        Programmatic app icon generator
 Info.plist                 macOS bundle metadata
 build.sh                   Reproducible universal app build
 install.sh                 Verified community installer
+script/build_and_run.sh    Local build, launch, and verification entrypoint
 scripts/package.sh         ZIP, DMG, and checksum packaging
 .github/workflows/         Continuous integration and tagged releases
 ```
@@ -140,6 +146,9 @@ DeepSeek Harness 运行时始终从官方 npm 包 `@deepseek-ai/dsh` 单独安�
 安装器会从 GitHub Release 下载最新版 ZIP、核对 SHA-256、安装应用、仅移除该 App 的
 隔离标记、安装官方 `@deepseek-ai/dsh` 运行时并启动应用。运行前可先查看仓库中的
 [install.sh](install.sh) 源码。
+
+如果手动安装 App 且本机没有 DSH，首次启动页面会显示“一键安装官方 DSH 运行时”按钮。
+应用会直接调用 npm（不经过 shell）将官方包安装到 `~/.dsh/app`，完成后自动启动服务。
 
 也可以从 [Releases](https://github.com/frankfika/dsh-desktop-macos/releases/latest) 下载
 通用 `.dmg` 手动安装。目前发布包使用临时签名，因为项目尚无 Apple Developer ID；手动
