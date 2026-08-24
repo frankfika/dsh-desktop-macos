@@ -39,7 +39,8 @@ rm -rf .build
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" .build/bin
 
 echo "==> Generating app icon"
-swiftc -parse-as-library -O "${RESDIR_FLAGS[@]}" -o .build/icon-gen tools/IconGen.swift
+swiftc -parse-as-library -O ${RESDIR_FLAGS[@]+"${RESDIR_FLAGS[@]}"} \
+    -o .build/icon-gen tools/IconGen.swift
 ./.build/icon-gen
 mkdir -p .build/AppIcon.iconset
 sips -z 16 16 .build/icon-1024.png --out .build/AppIcon.iconset/icon_16x16.png >/dev/null
@@ -58,7 +59,8 @@ echo "==> Compiling for: $ARCHS"
 BINARIES=()
 for arch in $ARCHS; do
     binary=".build/bin/DSHLauncher-${arch}"
-    swiftc -parse-as-library -O -swift-version 5 "${RESDIR_FLAGS[@]}" \
+    swiftc -parse-as-library -O -swift-version 5 \
+        ${RESDIR_FLAGS[@]+"${RESDIR_FLAGS[@]}"} \
         -target "${arch}-apple-macosx${MACOS_MIN}" \
         -framework SwiftUI -framework AppKit -framework WebKit \
         -o "$binary" Sources/DSHLauncher.swift

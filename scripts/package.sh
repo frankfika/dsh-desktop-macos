@@ -6,11 +6,14 @@ cd "$(dirname "$0")/.."
 
 APP_NAME="DSH Desktop"
 APP=".build/${APP_NAME}.app"
-VERSION="${VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" 2>/dev/null || true)}"
+VERSION="${VERSION:-}"
 
-if [ ! -d "$APP" ]; then
+if [ ! -d "$APP" ] || [ ! -f "$APP/Contents/Info.plist" ]; then
     echo "Missing $APP. Run ./build.sh first." >&2
     exit 1
+fi
+if [ -z "$VERSION" ]; then
+    VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 fi
 if [ -z "$VERSION" ]; then
     echo "Could not determine app version." >&2
