@@ -18,7 +18,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fangchen.dsh-mobile
-        PRODUCT_NAME: DSH Mobile
+        PRODUCT_NAME: DSHMobile
         MARKETING_VERSION: 1.2.0
         CURRENT_PROJECT_VERSION: 2
         GENERATE_INFOPLIST_FILE: NO

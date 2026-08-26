@@ -259,7 +259,7 @@
 				);
 				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.fangchen.dsh-mobile";
-				PRODUCT_NAME = "DSH Mobile";
+				PRODUCT_NAME = DSHMobile;
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -296,7 +296,7 @@
 				);
 				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.fangchen.dsh-mobile";
-				PRODUCT_NAME = "DSH Mobile";
+				PRODUCT_NAME = DSHMobile;
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
 				TARGETED_DEVICE_FAMILY = "1,2";
