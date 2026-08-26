@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- AGP 8.10.1 is intentionally paired with API 36 and Gradle 8.11.1. -->
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+    <!-- Adaptive icons require the v26 resource type even though minSdk is 26. -->
+    <issue id="ObsoleteSdkInt" severity="ignore" />
+</lint>

@@ -62,7 +62,7 @@ for arch in $ARCHS; do
     swiftc -parse-as-library -O -swift-version 5 \
         ${RESDIR_FLAGS[@]+"${RESDIR_FLAGS[@]}"} \
         -target "${arch}-apple-macosx${MACOS_MIN}" \
-        -framework SwiftUI -framework AppKit -framework WebKit \
+        -framework SwiftUI -framework AppKit -framework WebKit -framework CoreImage \
         -o "$binary" Sources/DSHLauncher.swift
     BINARIES+=("$binary")
 done
@@ -75,6 +75,7 @@ fi
 
 echo "==> Assembling app bundle"
 cp Info.plist "$APP/Contents/Info.plist"
+cp Resources/remote-bridge.js "$APP/Contents/Resources/remote-bridge.js"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"
 codesign --force --deep --sign - "$APP"

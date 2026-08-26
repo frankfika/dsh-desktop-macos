@@ -3,6 +3,7 @@ import AppKit
 @preconcurrency import WebKit
 import ServiceManagement
 import Darwin
+import CoreImage.CIFilterBuiltins
 
 // MARK: - 小工具函数
 
@@ -196,6 +197,35 @@ func dynamicNodeBinDirs(home: String) -> [String] {
     return dirs
 }
 
+/// 优先返回 Wi-Fi/有线网卡的 IPv4 地址，供手机在同一局域网访问。
+func localNetworkAddress() -> String? {
+    var head: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&head) == 0, let first = head else { return nil }
+    defer { freeifaddrs(head) }
+    var candidates: [(name: String, address: String)] = []
+    var cursor: UnsafeMutablePointer<ifaddrs>? = first
+    while let item = cursor {
+        let flags = Int32(item.pointee.ifa_flags)
+        if let addr = item.pointee.ifa_addr,
+           addr.pointee.sa_family == UInt8(AF_INET),
+           (flags & IFF_UP) != 0, (flags & IFF_LOOPBACK) == 0 {
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if getnameinfo(addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
+                candidates.append((String(cString: item.pointee.ifa_name), String(cString: host)))
+            }
+        }
+        cursor = item.pointee.ifa_next
+    }
+    return candidates.sorted { lhs, rhs in
+        let priority = { (name: String) -> Int in name == "en0" ? 0 : (name.hasPrefix("en") ? 1 : 2) }
+        return priority(lhs.name) < priority(rhs.name)
+    }.first?.address
+}
+
+func makeRemoteToken() -> String {
+    (UUID().uuidString + UUID().uuidString).replacingOccurrences(of: "-", with: "").lowercased()
+}
+
 // MARK: - 状态机
 
 enum DSHState: Equatable {
@@ -257,7 +287,7 @@ enum DSHState: Equatable {
 final class Manager: ObservableObject {
     static let shared = Manager()
 
-    @Published var state: DSHState = .stopped
+    @Published var state: DSHState = .stopped { didSet { updateRemoteStatus() } }
     @Published var logs: String = ""
     @Published var dshPath: String = UserDefaults.standard.string(forKey: "dshPath") ?? resolveDshPath()
     @Published var host: String = UserDefaults.standard.string(forKey: "host") ?? "127.0.0.1"
@@ -279,20 +309,41 @@ final class Manager: ObservableObject {
     }()
     @Published var launchAtLogin: Bool = (SMAppService.mainApp.status == .enabled)
     @Published var isInstallingRuntime: Bool = false
+    @Published var remoteEnabled: Bool = UserDefaults.standard.bool(forKey: "remoteEnabled")
+    @Published var remotePort: Int = {
+        let value = UserDefaults.standard.integer(forKey: "remotePort")
+        return value == 0 ? 3081 : value
+    }()
+    @Published var remoteRunning: Bool = false
+    @Published var remoteToken: String = {
+        if let saved = UserDefaults.standard.string(forKey: "remoteToken"), saved.count >= 16 { return saved }
+        let token = makeRemoteToken()
+        UserDefaults.standard.set(token, forKey: "remoteToken")
+        return token
+    }()
 
     private var proc: Process?
     private var installProc: Process?
     private var readyTimer: Timer?
     private var watchTimer: Timer?
+    private var remoteCommandTimer: Timer?
     private var logLines: [String] = []
     private var pendingRestart = false
     private var warnedBusy = false
     private var lastHealthCheck: Date?
     private var healthFailStreak = 0
+    private var remoteProc: Process?
+    private var remoteConfigurationRestart: DispatchWorkItem?
+    private var remoteRestartAfterExternalStop = false
 
     var url: URL {
         URL(string: "http://\(host):\(port)") ?? URL(string: "http://127.0.0.1:3080")!
     }
+    var remoteAddress: String { localNetworkAddress() ?? "127.0.0.1" }
+    var remotePairingURL: URL? {
+        URL(string: "http://\(remoteAddress):\(remotePort)/__remote/pair?token=\(remoteToken)")
+    }
+    var remoteDashboardURL: URL? { URL(string: "http://\(remoteAddress):\(remotePort)/__remote/") }
     /// 是否由本应用托管了子进程
     var ownsProcess: Bool { proc != nil }
     /// 是否可以点击「启动」
@@ -305,6 +356,11 @@ final class Manager: ObservableObject {
         watchTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             self?.refreshExternal()
         }
+        remoteCommandTimer = Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) { [weak self] _ in
+            self?.consumeRemoteCommand()
+            self?.updateRemoteStatus()
+        }
+        if remoteEnabled { DispatchQueue.main.async { [weak self] in self?.startRemoteAccess() } }
     }
 
     // MARK: 持久化
@@ -317,6 +373,154 @@ final class Manager: ObservableObject {
         d.set(autoStart, forKey: "autoStart")
         d.set(stopOnQuit, forKey: "stopOnQuit")
         d.set(cleanupStaleOnStart, forKey: "cleanupStaleOnStart")
+        d.set(remoteEnabled, forKey: "remoteEnabled")
+        d.set(remotePort, forKey: "remotePort")
+        d.set(remoteToken, forKey: "remoteToken")
+    }
+
+    // MARK: 手机远程控制
+
+    private var remoteDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("DSH Desktop/Remote", isDirectory: true)
+    }
+
+    func setRemoteEnabled(_ enabled: Bool) {
+        remoteEnabled = enabled
+        persist()
+        if !enabled {
+            remoteConfigurationRestart?.cancel()
+            remoteConfigurationRestart = nil
+        }
+        enabled ? startRemoteAccess() : stopRemoteAccess()
+    }
+
+    func remoteConfigurationDidChange() {
+        persist()
+        guard remoteEnabled else { return }
+        remoteConfigurationRestart?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.remoteEnabled else { return }
+            self.restartRemoteAccess()
+        }
+        remoteConfigurationRestart = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    func regenerateRemoteToken() {
+        remoteToken = makeRemoteToken()
+        persist()
+        if remoteEnabled { restartRemoteAccess() }
+    }
+
+    func restartRemoteAccess() {
+        remoteConfigurationRestart?.cancel()
+        remoteConfigurationRestart = nil
+        stopRemoteAccess()
+        if remoteEnabled { DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.startRemoteAccess() } }
+    }
+
+    func startRemoteAccess() {
+        guard remoteEnabled, remoteProc == nil else { return }
+        guard let node = findNodeExecutable() else {
+            appendLog("⚠️ 手机远程控制无法启动：未找到 Node.js")
+            return
+        }
+        guard listeningPid(port: remotePort) == nil else {
+            appendLog("⚠️ 手机远程端口 \(remotePort) 已被占用")
+            return
+        }
+        guard let script = Bundle.main.url(forResource: "remote-bridge", withExtension: "js") else {
+            appendLog("⚠️ 手机远程控制组件缺失")
+            return
+        }
+        do {
+            try FileManager.default.createDirectory(at: remoteDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        } catch {
+            appendLog("⚠️ 无法创建手机远程控制目录：\(error.localizedDescription)")
+            return
+        }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: node)
+        p.arguments = [script.path]
+        var environment = enrichedEnvironment()
+        environment["DSH_REMOTE_PORT"] = "\(remotePort)"
+        environment["DSH_TARGET_HOST"] = "127.0.0.1"
+        environment["DSH_TARGET_PORT"] = "\(port)"
+        environment["DSH_REMOTE_TOKEN"] = remoteToken
+        environment["DSH_REMOTE_DIR"] = remoteDirectory.path
+        p.environment = environment
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        p.terminationHandler = { [weak self, weak p] _ in
+            DispatchQueue.main.async {
+                guard let self, let p, self.remoteProc === p else { return }
+                self.remoteProc = nil
+                self.remoteRunning = false
+            }
+        }
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let output = String(data: data, encoding: .utf8) else { return }
+            DispatchQueue.main.async { self?.appendLog(output.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        }
+        do {
+            try p.run()
+            remoteProc = p
+            remoteRunning = true
+            updateRemoteStatus()
+            appendLog("📱 手机远程控制已开启 → http://\(remoteAddress):\(remotePort)")
+        } catch {
+            appendLog("⚠️ 手机远程控制启动失败：\(error.localizedDescription)")
+        }
+    }
+
+    func stopRemoteAccess() {
+        remoteProc?.terminate()
+        remoteProc = nil
+        remoteRunning = false
+        try? FileManager.default.removeItem(at: remoteDirectory.appendingPathComponent("command.json"))
+    }
+
+    private func consumeRemoteCommand() {
+        guard remoteEnabled else { return }
+        let file = remoteDirectory.appendingPathComponent("command.json")
+        guard let data = try? Data(contentsOf: file),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let action = object["action"] as? String else { return }
+        try? FileManager.default.removeItem(at: file)
+        appendLog("📱 收到手机指令：\(action)")
+        switch action {
+        case "start": if state.canTryStart { start() }
+        case "restart":
+            if ownsProcess {
+                restart()
+            } else if case .externalRunning = state {
+                remoteRestartAfterExternalStop = true
+                killExternal()
+            }
+        case "stop":
+            if ownsProcess { stop() }
+            else if case .externalRunning = state { killExternal() }
+        default: break
+        }
+    }
+
+    private func updateRemoteStatus() {
+        guard remoteEnabled else { return }
+        let snapshot: [String: Any]
+        switch state {
+        case .stopped: snapshot = ["state": "stopped", "label": "已停止", "detail": "可以从手机启动", "controllable": false]
+        case .starting: snapshot = ["state": "starting", "label": "启动中…", "detail": "正在等待 Harness 就绪", "controllable": false]
+        case .running(let pid): snapshot = ["state": "running", "label": "运行中", "detail": "PID \(pid)", "controllable": true]
+        case .externalRunning(let pid): snapshot = ["state": "externalRunning", "label": "外部实例运行中", "detail": "PID \(pid)", "controllable": true]
+        case .stopping: snapshot = ["state": "stopping", "label": "停止中…", "detail": "", "controllable": false]
+        case .failed(let message): snapshot = ["state": "failed", "label": "运行异常", "detail": message, "controllable": false]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: snapshot) else { return }
+        try? FileManager.default.createDirectory(at: remoteDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try? data.write(to: remoteDirectory.appendingPathComponent("status.json"), options: .atomic)
     }
 
     // MARK: 日志
@@ -484,6 +688,13 @@ final class Manager: ObservableObject {
         let hostHere = host
         guard let pid = pid else {
             warnedBusy = false
+            if remoteRestartAfterExternalStop {
+                remoteRestartAfterExternalStop = false
+                state = .stopped
+                appendLog("📱 外部实例已停止，按手机指令重新启动")
+                start()
+                return
+            }
             if case .externalRunning = state {
                 state = .stopped
                 appendLog("外部实例已退出")
@@ -775,6 +986,7 @@ final class Manager: ObservableObject {
     /// 退出应用时清理子进程（受「退出时停止服务」开关控制）
     func terminateChild() {
         installProc?.terminate()
+        stopRemoteAccess()
         guard stopOnQuit else { return }
         if let p = proc {
             p.terminate()
@@ -852,6 +1064,7 @@ struct ContentView: View {
     @ObservedObject private var mgr = Manager.shared
     @State private var showSettings = false
     @State private var confirmKillExternal = false
+    @State private var showRemoteAccess = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -870,6 +1083,9 @@ struct ContentView: View {
         .onAppear { mgr.startIfNeeded() }
         .sheet(isPresented: $showSettings) {
             SettingsView()
+        }
+        .sheet(isPresented: $showRemoteAccess) {
+            RemoteAccessView()
         }
         .alert("停止外部实例", isPresented: $confirmKillExternal) {
             Button("停止", role: .destructive) { mgr.killExternal() }
@@ -921,6 +1137,10 @@ struct ContentView: View {
             }
 
             Divider().frame(height: 18)
+
+            Button(action: { showRemoteAccess = true }) {
+                Label("手机", systemImage: "iphone.gen3")
+            }
 
             Button(action: { showSettings = true }) {
                 Label("设置", systemImage: "gearshape")
@@ -1004,6 +1224,103 @@ struct ContentView: View {
     }
 }
 
+// MARK: - 手机远程控制
+
+struct QRCodeView: View {
+    let value: String
+
+    var body: some View {
+        if let image = makeImage() {
+            Image(nsImage: image)
+                .interpolation(.none)
+                .resizable()
+                .frame(width: 196, height: 196)
+                .padding(10)
+                .background(Color.white)
+                .cornerRadius(16)
+        }
+    }
+
+    private func makeImage() -> NSImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(value.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)) else { return nil }
+        let representation = NSCIImageRep(ciImage: output)
+        let image = NSImage(size: representation.size)
+        image.addRepresentation(representation)
+        return image
+    }
+}
+
+struct RemoteAccessView: View {
+    @ObservedObject private var mgr = Manager.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("手机远程控制").font(.title2).bold()
+                    Text("像 Codex Mobile 一样，在手机浏览器控制这台电脑上的 DSH")
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(get: { mgr.remoteEnabled }, set: { mgr.setRemoteEnabled($0) }))
+                    .toggleStyle(.switch)
+            }
+
+            if mgr.remoteEnabled {
+                if mgr.remoteRunning, let pairing = mgr.remotePairingURL {
+                    QRCodeView(value: pairing.absoluteString)
+                    VStack(spacing: 7) {
+                        Label("桥接服务已运行", systemImage: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text("手机与电脑连接同一 Wi-Fi 后扫码")
+                            .font(.headline)
+                        Text("也可以在手机打开：\(mgr.remoteDashboardURL?.absoluteString ?? "")")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    HStack {
+                        Button("在本机预览") {
+                            if let url = mgr.remotePairingURL { NSWorkspace.shared.open(url) }
+                        }
+                        Button("复制配对链接") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(pairing.absoluteString, forType: .string)
+                        }
+                        Button("重置配对", role: .destructive) { mgr.regenerateRemoteToken() }
+                    }
+                    Text("完整 DSH 仍只监听本机；手机流量经过带配对会话的代理。若要在外网使用，请让电脑和手机加入同一个 Tailscale 网络。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 500)
+                } else {
+                    ProgressView("正在启动手机桥接服务…")
+                    Button("重试") { mgr.startRemoteAccess() }
+                }
+            } else {
+                Image(systemName: "iphone.slash")
+                    .font(.system(size: 42))
+                    .foregroundColor(.secondary)
+                Text("开启后会在局域网端口 \(mgr.remotePort) 提供带配对保护的手机入口。")
+                    .foregroundColor(.secondary)
+            }
+
+            HStack {
+                Spacer()
+                Button("完成") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 600)
+        .frame(minHeight: 510)
+    }
+}
+
 // MARK: - 设置
 
 struct SettingsView: View {
@@ -1076,6 +1393,21 @@ struct SettingsView: View {
                 .padding(4)
             }
 
+            GroupBox(label: Label("手机远程控制", systemImage: "iphone.gen3")) {
+                HStack(spacing: 12) {
+                    Toggle("启用手机桥接", isOn: Binding(get: { mgr.remoteEnabled }, set: { mgr.setRemoteEnabled($0) }))
+                    Text("端口:")
+                    TextField("3081", value: $mgr.remotePort, formatter: portFormatter)
+                        .frame(width: 80)
+                    Text(mgr.remoteRunning ? "● 已运行" : "○ 未运行")
+                        .foregroundColor(mgr.remoteRunning ? .green : .secondary)
+                    Spacer()
+                    Button("重启桥接") { mgr.restartRemoteAccess() }
+                        .disabled(!mgr.remoteEnabled)
+                }
+                .padding(4)
+            }
+
             GroupBox(label: Label("日志", systemImage: "text.alignleft")) {
                 VStack(alignment: .leading, spacing: 6) {
                     ScrollViewReader { proxy in
@@ -1109,12 +1441,13 @@ struct SettingsView: View {
         }
         .padding(18)
         .frame(width: 640)
-        .onChange(of: mgr.port) { _ in mgr.persist(); mgr.refreshExternal() }
+        .onChange(of: mgr.port) { _ in mgr.remoteConfigurationDidChange(); mgr.refreshExternal() }
         .onChange(of: mgr.host) { _ in mgr.persist() }
         .onChange(of: mgr.dshPath) { _ in mgr.persist() }
         .onChange(of: mgr.autoStart) { _ in mgr.persist() }
         .onChange(of: mgr.stopOnQuit) { _ in mgr.persist() }
         .onChange(of: mgr.cleanupStaleOnStart) { _ in mgr.persist() }
+        .onChange(of: mgr.remotePort) { _ in mgr.remoteConfigurationDidChange() }
         .alert("停止外部实例", isPresented: $confirmKillExternal) {
             Button("停止", role: .destructive) { mgr.killExternal() }
             Button("取消", role: .cancel) {}

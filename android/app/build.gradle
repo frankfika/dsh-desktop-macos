@@ -1,0 +1,50 @@
+plugins {
+    id "com.android.application"
+}
+
+def releaseKeystore = System.getenv("ANDROID_KEYSTORE_FILE")
+
+android {
+    namespace "com.fangchen.dshmobile"
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.fangchen.dshmobile"
+        minSdk 26
+        targetSdk 36
+        versionCode 10200
+        versionName System.getenv("VERSION_NAME") ?: "1.2.0"
+
+    }
+
+    signingConfigs {
+        release {
+            if (releaseKeystore) {
+                storeFile file(releaseKeystore)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (releaseKeystore) signingConfig signingConfigs.release
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
+    testImplementation "junit:junit:4.13.2"
+}

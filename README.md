@@ -54,6 +54,8 @@ Node.js 22.19+ 或 24+。如果没有 DSH，在应用中点击 **Install officia
 - Self-contained Windows x64 and ARM64 builds with no separate .NET requirement
 - Detects an existing healthy `dsh web` process or starts one automatically
 - Start, stop, restart, open in browser, launch at login, and live logs
+- Pair a phone by QR code, control the desktop runtime, and use the complete DSH Web UI
+  through an authenticated local proxy (macOS)
 - Detects Homebrew, npm, nvm, WorkBuddy, and the recommended local installation path
 - Offers one-click installation of the official `@deepseek-ai/dsh` runtime when missing
 - Cleans up an unresponsive `dsh` process after confirming that its local HTTP endpoint
@@ -103,6 +105,56 @@ cd dsh-desktop-macos
 open ".build/DSH Desktop.app"
 ```
 
+## Control DSH from your phone (macOS)
+
+1. Open **DSH Desktop** and click **Phone / 手机** in the toolbar.
+2. Turn on mobile remote control. Keep the Mac and phone on the same Wi-Fi network.
+3. Scan the QR code with the phone. The one-time link stores a protected pairing session
+   in the phone browser and immediately removes the token from the address bar.
+4. The mobile dashboard can start, stop, or restart the DSH process. Tap **Open complete
+   DeepSeek Harness** to use the normal Harness UI from the phone. On iPhone, Safari's
+   **Add to Home Screen** makes it behave like a lightweight companion app.
+
+DSH itself continues to listen only on `127.0.0.1`. DSH Desktop runs a separate bridge on
+port `3081`, checks a random per-install pairing token, and proxies both HTTP and WebSocket
+traffic. You can change the bridge port or reset all paired phones from the desktop app.
+For access away from home, connect the Mac and phone with an encrypted private network such
+as Tailscale; do not forward port `3081` directly from a public router because the local
+bridge intentionally uses HTTP and relies on the trusted LAN or encrypted overlay network.
+
+### Native iPhone companion
+
+The repository also includes a native SwiftUI client in `ios/`. It provides camera QR
+pairing, Keychain-backed credentials, a native status/control dashboard, pull to refresh,
+and an authenticated in-app Harness browser.
+
+```bash
+cd ios
+./generate.sh
+open DSHMobile.xcodeproj
+```
+
+Select the `DSHMobile` scheme and your iPhone, choose your Apple development team under
+Signing & Capabilities, then press Run. In DSH Mobile, scan the QR code shown by the Mac
+app. The deployment target is iOS 17.
+
+### Native Android companion
+
+The native Android client lives in `android/` and supports Android 8.0 (API 26) or newer.
+It uses Google Code Scanner for permission-free QR pairing, Android Keystore AES-GCM for
+the pairing credential, a native status/control dashboard, and an authenticated WebView
+for the full Harness UI.
+
+```bash
+cd android
+./build_and_verify.sh
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+The verification script runs unit tests, builds the debug APK, and requires Android Lint
+to pass. For normal installation, download the signed `DSH-Mobile-Android-*.apk` from the
+latest GitHub Release. On a phone, open DSH Mobile and scan the same QR code shown by DSH Desktop.
+
 `build.sh` produces an ad-hoc-signed universal app by default. To build only for the
 current architecture:
 
@@ -116,13 +168,17 @@ Create local ZIP and DMG artifacts with:
 ./scripts/package.sh
 ```
 
-Pushing a tag such as `v1.0.3` runs the GitHub Actions release workflow and attaches the
-universal ZIP, DMG, and SHA-256 checksums to a GitHub Release.
+Pushing a tag such as `v1.2.0` runs the GitHub Actions release workflow and attaches the
+universal macOS ZIP/DMG, Windows portable builds, signed Android APK, and SHA-256 checksums
+to a GitHub Release.
 
 ## Project structure
 
 ```text
 Sources/DSHLauncher.swift  Process lifecycle, SwiftUI window, and embedded Web UI
+Resources/remote-bridge.js Authenticated mobile dashboard and HTTP/WebSocket proxy
+ios/                       Native DSH Mobile iPhone app and generated Xcode project
+android/                   Native DSH Mobile Android app, Gradle wrapper, tests, and APK build
 tools/IconGen.swift        Programmatic app icon generator
 Info.plist                 macOS bundle metadata
 build.sh                   Reproducible universal app build
