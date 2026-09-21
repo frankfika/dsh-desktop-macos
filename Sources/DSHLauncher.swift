@@ -289,6 +289,10 @@ final class Manager: ObservableObject {
 
     @Published var state: DSHState = .stopped { didSet { updateRemoteStatus() } }
     @Published var logs: String = ""
+    /// `dsh web` 启动时打印的带 launchToken 的本地 URL；nil 时回退到裸 host:port。
+    /// dsh-web 要求访问者必须先用 `?token=...` URL 才能换取 cookie，
+    /// 否则 WebView 加载会被 server 直接 401。
+    @Published var authenticatedURL: URL?
     @Published var dshPath: String = UserDefaults.standard.string(forKey: "dshPath") ?? resolveDshPath()
     @Published var host: String = UserDefaults.standard.string(forKey: "host") ?? "127.0.0.1"
     @Published var port: Int = {
@@ -328,6 +332,8 @@ final class Manager: ObservableObject {
     private var watchTimer: Timer?
     private var remoteCommandTimer: Timer?
     private var logLines: [String] = []
+    /// dsh web 子进程 stdout 行缓冲，按 \n 切行后逐行解析。
+    private var stdoutBuffer: String = ""
     private var pendingRestart = false
     private var warnedBusy = false
     private var lastHealthCheck: Date?
@@ -337,7 +343,7 @@ final class Manager: ObservableObject {
     private var remoteRestartAfterExternalStop = false
 
     var url: URL {
-        URL(string: "http://\(host):\(port)") ?? URL(string: "http://127.0.0.1:3080")!
+        authenticatedURL ?? (URL(string: "http://\(host):\(port)") ?? URL(string: "http://127.0.0.1:3080")!)
     }
     var remoteAddress: String { localNetworkAddress() ?? "127.0.0.1" }
     var remotePairingURL: URL? {
@@ -817,6 +823,9 @@ final class Manager: ObservableObject {
 
         proc = p
         state = .starting
+        // 每次启动都是新进程：清掉旧的 token URL 与 stdout 缓冲，避免错位
+        authenticatedURL = nil
+        stdoutBuffer = ""
         appendLog("▶ 启动 dsh web → \(url.absoluteString)  (pid \(p.processIdentifier))")
 
         let fh = pipe.fileHandleForReading
@@ -826,13 +835,45 @@ final class Manager: ObservableObject {
                 handle.readabilityHandler = nil
                 return
             }
-            guard let s = String(data: data, encoding: .utf8) else { return }
-            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            DispatchQueue.main.async { self?.appendLog(trimmed) }
+            guard let chunk = String(data: data, encoding: .utf8) else { return }
+            DispatchQueue.main.async { self?.ingestStdoutChunk(chunk) }
         }
 
         waitForReady()
+    }
+
+    /// 把子进程 stdout 按 \n 切行：每行先尝试捕获带 token 的 URL，再写日志。
+    /// 解析跨多个 `availableData` 回调到来的半个行也要正确。
+    private func ingestStdoutChunk(_ chunk: String) {
+        stdoutBuffer += chunk
+        while let nl = stdoutBuffer.firstIndex(of: "\n") {
+            let raw = String(stdoutBuffer[..<nl])
+            stdoutBuffer.removeSubrange(...nl)
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            appendLog(line)
+            captureAuthenticatedURL(from: line)
+        }
+    }
+
+    /// 从 `dsh web: http://127.0.0.1:3090/?token=xxx (LAN: ...)` 中抠出首个 URL。
+    /// 只接受显式带 `?token=` 的地址，避免误把任何 http:// 行当成认证入口。
+    private func captureAuthenticatedURL(from line: String) {
+        guard authenticatedURL == nil else { return }
+        guard let marker = line.range(of: "dsh web:") else { return }
+        var rest = line[marker.upperBound...]
+        while let c = rest.first, c.isWhitespace { rest.removeFirst() }
+        guard rest.hasPrefix("http://") || rest.hasPrefix("https://") else { return }
+        var endIdx = rest.startIndex
+        for i in rest.indices {
+            let c = rest[i]
+            if c.isWhitespace || c == "(" { endIdx = i; break }
+            endIdx = rest.index(after: i)
+        }
+        let urlString = String(rest[..<endIdx])
+        guard let u = URL(string: urlString),
+              u.query?.contains("token=") == true else { return }
+        authenticatedURL = u
     }
 
     private func waitForReady() {
@@ -842,18 +883,32 @@ final class Manager: ObservableObject {
         let portHere = port
         readyTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] t in
             guard let self = self else { t.invalidate(); return }
-            // HTTP 健康检查放后台线程，避免阻塞主线程
+            // 1) 首选：已经从 stdout 拿到带 token 的 URL。这才是真正能通过 server
+            //    认证的入口——立刻切到 running，避免 WebView 用裸 host:port 锁死 401。
+            if let authURL = self.authenticatedURL, let pid = self.proc?.processIdentifier, self.state == .starting {
+                t.invalidate()
+                self.readyTimer = nil
+                self.state = .running(pid)
+                self.appendLog("✅ dsh web 就绪 → \(authURL.absoluteString)")
+                return
+            }
+            // 2) 兜底：HTTP 端口已开（接管外部 dsh / 老版本未打印 URL 时）。
+            //    这种场景下拿不到 token，WebView 加载会被 401；日志里说清楚怎么救。
             DispatchQueue.global().async {
                 let healthy = isHttpAlive(hostHere, portHere)
                 DispatchQueue.main.async {
-                    // self 已在外部闭包解包为强引用，直接使用（不再重复 guard）
                     guard self.proc != nil, self.state == .starting else { t.invalidate(); return }
                     if healthy {
                         t.invalidate()
                         self.readyTimer = nil
                         if let pid = self.proc?.processIdentifier {
                             self.state = .running(pid)
-                            self.appendLog("✅ dsh web 就绪 → \(self.url.absoluteString)")
+                            if self.authenticatedURL == nil {
+                                self.appendLog("⚠️ dsh web 已起但未捕获到带 token 的 URL（多半是外部接管场景）")
+                                self.appendLog("    请用「系统浏览器」打开外部 dsh 终端里打印的 URL（应含 ?token=…）")
+                            } else {
+                                self.appendLog("✅ dsh web 就绪 → \(self.url.absoluteString)")
+                            }
                         }
                     } else {
                         tries += 1
@@ -970,6 +1025,9 @@ final class Manager: ObservableObject {
         proc = nil
         readyTimer?.invalidate()
         readyTimer = nil
+        // 旧进程的 token 已经作废；立刻清掉，避免下次启动前 UI 还显示旧的 token URL
+        authenticatedURL = nil
+        stdoutBuffer = ""
         appendLog("⏹ dsh web 已退出")
         if pendingRestart {
             pendingRestart = false
